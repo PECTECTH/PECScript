@@ -149,3 +149,149 @@ service, or upload anything anywhere. The generated report itself (which
 does contain real, machine-specific data such as installed software and MAC
 addresses) is excluded from version control by `.gitignore` so it is never
 accidentally committed.
+
+## IT Compliance Checklist (Test-ITCompliance.ps1)
+
+A second, separate script — `Test-ITCompliance.ps1` — checks the machine
+against a company IT compliance checklist (9 numbered items) and writes its
+own Markdown report. It is a **CHECK / AUDIT script only**.
+
+> **This script never deletes or uninstalls anything.** It only reads,
+> detects, and measures. Items **7** (unused/bloatware programs) and **8**
+> (junk files) only **detect and report candidates/sizes** — no file,
+> program, or setting is ever removed, moved, or changed by this script.
+> Acting on those lists (or not) is entirely the IT team's decision.
+>
+> Item **6** (software licensing) is only a **partial / indirect
+> indicator** (Windows/Office activation status) — it is not, and cannot
+> be, a full audit of every installed application's license authenticity.
+
+### What it checks
+
+Each item maps directly to the company's numbered IT checklist and produces
+exactly one primary verdict plus supporting details/tables:
+
+1. **Storage ใช้งานได้ปกติ/ไม่เต็ม** — free space % on every fixed volume,
+   physical disk health (`Get-PhysicalDisk`, with graceful fallback), and one
+   rough, approximate write-speed sample per volume (a ~50MB temp file is
+   written, timed, then deleted immediately). FAIL if any volume is below
+   `-StorageFreeThresholdPercent` free, or any disk is not Healthy/OK.
+2. **Username ตามที่ IT กำหนด** — compares `$env:USERNAME` against
+   `-ExpectedUsernamePattern` if supplied (PASS/FAIL); otherwise **SKIPPED**
+   with a note to re-run once IT provides the naming rule. The current
+   username is always shown as INFO.
+3. **Network ของบริษัท** — domain join status/name, active adapters, current
+   Wi-Fi SSID (via `netsh wlan show interfaces`), and default gateway.
+   Compares against `-ExpectedDomain` and/or `-ExpectedSSIDs` if supplied
+   (PASS/FAIL, N/A for SSID if wired-only); **SKIPPED** overall (informational
+   details still shown) if neither parameter is supplied.
+4. **OS เวอร์ชั่นล่าสุด** — current OS caption/version/build, plus a pending
+   Windows Update count (up to 10 titles listed) via the
+   `Microsoft.Update.Session` COM object. The search always runs inside a
+   background job bounded by `-WindowsUpdateTimeoutSeconds` so a slow/hung
+   search can never hang the script (verdict UNKNOWN on timeout/error). "N/A"
+   if `-SkipWindowsUpdateCheck` is used.
+5. **Battery Life ปกติ** — detects a battery via `Win32_Battery`; "N/A" on
+   desktops. If present, runs `powercfg /batteryreport` to a short-lived
+   temp XML file, computes health % (`FullChargeCapacity / DesignCapacity`),
+   and always deletes the temp file afterward (even on error). PASS/FAIL
+   against `-BatteryHealthThresholdPercent`.
+6. **Software ลิขสิทธิ์แท้ (ตรวจได้บางส่วน)** — Windows OS activation status
+   (`SoftwareLicensingProduct`) and, if detectable, Microsoft Office
+   activation status. Always **INFO** — never PASS/FAIL — because verifying
+   third-party license authenticity cannot be automated generically.
+7. **โปรแกรมที่ไม่ได้ใช้งาน/Debloat (ตรวจจับเท่านั้น)** — reuses the same
+   uninstall-registry enumeration as `Invoke-SystemAudit.ps1`'s installed
+   applications section, then flags DisplayNames containing any
+   `-BloatwareKeywords` substring (case-insensitive). Always **INFO**, with a
+   count and table of matches. Detection only — nothing is uninstalled.
+8. **ไฟล์ขยะ (ตรวจจับเท่านั้น)** — total size of common reclaimable locations
+   (`%TEMP%`, `C:\Windows\Temp`, the Recycle Bin, and
+   `C:\Windows\SoftwareDistribution\Download`). **WARN** if the total exceeds
+   `-JunkFilesWarnThresholdGB`, otherwise **INFO**. Sizing only — nothing is
+   deleted.
+9. **Antivirus เปิดใช้งาน** — prefers `Get-MpComputerStatus` (Windows
+   Defender real-time protection, signature age) and also checks
+   `root/SecurityCenter2 AntiVirusProduct` to catch a third-party AV that may
+   have replaced Defender. PASS if either reports active protection; FAIL if
+   neither does; UNKNOWN if both queries error (common on Server SKUs).
+
+Every check is wrapped in its own function with a `try/catch`, mirroring the
+defensive style in `Invoke-SystemAudit.ps1` — a failure in one check reports
+verdict **UNKNOWN** with the reason instead of aborting the rest of the
+script.
+
+### Verdict scale
+
+`PASS`, `FAIL`, `WARN`, `INFO`, `SKIPPED`, `UNKNOWN`, `N/A`.
+
+The **Overall** verdict at the end of the report is `FAIL` if any item is
+`FAIL`; otherwise `WARN` if any item is `WARN`; otherwise `PASS`. The
+process exit code is `1` if overall is `FAIL`, else `0` — set only *after*
+the report file has been saved, so the report is never lost.
+
+### Parameters
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `-OutputPath` | Current user's Documents folder | Where the Markdown report is saved. |
+| `-ExpectedUsernamePattern` | _(none)_ | Regex for the company's Windows username naming convention. Omit to get a SKIPPED verdict — never guessed. |
+| `-ExpectedDomain` | _(none)_ | AD domain name the machine should be joined to. |
+| `-ExpectedSSIDs` | _(none)_ | One or more allowed corporate Wi-Fi SSID(s). |
+| `-StorageFreeThresholdPercent` | `15` | Fail if any fixed volume has less than this % free. |
+| `-BatteryHealthThresholdPercent` | `70` | Fail if battery health % is below this. |
+| `-JunkFilesWarnThresholdGB` | `5` | Warn (not fail) if reclaimable junk exceeds this many GB. |
+| `-BloatwareKeywords` | Generic starter list (trial security suites, game promos, OEM trialware, toolbars, etc.) | Substrings matched case-insensitively against installed app DisplayNames. Override to tune to your company's own policy. |
+| `-SkipWindowsUpdateCheck` | off | Skips the OS-update-freshness check entirely (useful on offline/locked-down machines); verdict becomes N/A. |
+| `-WindowsUpdateTimeoutSeconds` | `45` | Max seconds to wait for the background Windows Update search before reporting UNKNOWN. |
+
+### Quick Start — run with a single command (no clone required)
+
+Run with all defaults (username and network checks will be SKIPPED until
+company policy values are supplied):
+
+```powershell
+irm https://raw.githubusercontent.com/PECTECTH/PECScript/main/Test-ITCompliance.ps1 | iex
+```
+
+To pass company-policy parameters (`-ExpectedUsernamePattern`,
+`-ExpectedDomain`, `-ExpectedSSIDs`, etc.), build a scriptblock first, the
+same way as with `Invoke-SystemAudit.ps1`:
+
+```powershell
+$script = irm https://raw.githubusercontent.com/PECTECTH/PECScript/main/Test-ITCompliance.ps1
+& ([scriptblock]::Create($script)) -ExpectedUsernamePattern '^[a-z]+\.[a-z]+$' -ExpectedDomain 'CORP' -ExpectedSSIDs 'CorpWiFi','CorpWiFi-5G'
+```
+
+Same security note as above: only run `irm | iex` one-liners against a
+URL/repo you trust.
+
+### Usage (after cloning the repo locally)
+
+```powershell
+.\Test-ITCompliance.ps1
+```
+
+```powershell
+.\Test-ITCompliance.ps1 -ExpectedUsernamePattern '^[a-z]+\.[a-z]+$' -ExpectedDomain 'CORP' -ExpectedSSIDs 'CorpWiFi' -OutputPath 'C:\Reports'
+```
+
+If script execution is blocked by your local execution policy, run it with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-ITCompliance.ps1
+```
+
+### Output
+
+Saved to `-OutputPath` (default: Documents) as:
+
+```
+ITComplianceReport_<HOSTNAME>_<yyyyMMdd_HHmmss>.md
+```
+
+UTF-8 encoded, same hostname+timestamp convention as
+`SystemAuditReport_*.md`, and also excluded from version control by
+`.gitignore` since it contains real machine-specific data. The full path is
+printed to the console when the script finishes, along with the overall
+verdict.
