@@ -1,0 +1,6 @@
+# Generated system audit reports contain real machine data (installed software,
+# hardware serials, MAC addresses, etc.) and must never be committed.
+SystemAuditReport_*.md
+
+# Explicitly keep README.md even though the pattern above lives in the same repo.
+!README.md
