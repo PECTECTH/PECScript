@@ -560,7 +560,8 @@ function Invoke-SystemAudit {
     }
 
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $fileName = "SystemAuditReport_$timestamp.md"
+    $hostName = $env:COMPUTERNAME
+    $fileName = "SystemAuditReport_${hostName}_$timestamp.md"
     $fullPath = Join-Path -Path $resolvedOutputPath -ChildPath $fileName
 
     try {

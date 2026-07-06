@@ -103,8 +103,12 @@ By default, the report is written to the current user's real **Documents**
 folder (`[Environment]::GetFolderPath('MyDocuments')`) as:
 
 ```
-SystemAuditReport_<yyyyMMdd_HHmmss>.md
+SystemAuditReport_<HOSTNAME>_<yyyyMMdd_HHmmss>.md
 ```
+
+The hostname is included so reports from multiple machines can sit in the
+same Documents/folder (or be collected centrally) without overwriting each
+other or needing to be renamed by hand.
 
 The full path of the saved report is printed to the console when the script
 finishes.
